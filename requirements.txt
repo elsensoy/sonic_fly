@@ -1,0 +1,32 @@
+# Host pipeline (RTX 5060 laptop).
+#
+# Bring-up set - installs cleanly on Python 3.14, enough for
+# `python -m host.response_test` (capture -> beat detection -> response):
+numpy
+pyserial            # host -> Arduino serial
+sounddevice         # low-latency mic capture; also needs the PortAudio system
+                    # lib:  sudo apt install libportaudio2
+                    # (without it, capture falls back to ALSA's `arecord`)
+
+# 2D visualizer (host/sim/visualizer.py)
+pygame-ce
+
+# dev / test
+pytest
+
+# GPU audio-model branch (host/audio/audio_model.py, host/audio/dali_pipeline.py)
+# On the RTX box, plain `pip install torch` pulled a working cu130 build for
+# Blackwell (sm_120). On other machines pick the index for your driver.
+torch
+nvidia-dali-cuda120     # GPU mel front-end (optional; falls back to torch.stft)
+nvidia-cufft-cu12       # DALI's spectrogram op needs cuFFT; dali_pipeline preloads it
+
+# pretrained encoder (host/audio/encoders.py: ClapEncoder). Optional -
+# RandomProjectionEncoder is the default and needs none of this.
+transformers            # LAION CLAP via HF; downloads ~2 GB on first use
+torchaudio              # 16 kHz -> 48 kHz resample for CLAP
+
+# --- later ---
+# librosa           # offline beat/onset/tempo reference
+# pandas            # telemetry + analysis
+# matplotlib        # analysis plots

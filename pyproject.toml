@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: opt-in, excluded by default — run with `pytest -m slow`",
+]

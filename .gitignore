@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+notes/
+# Arduino build output
+build/
+*.hex
+*.elf
+
+# Captures / analysis output (keep sample run.csv tracked, ignore the rest)
+/captures/
+run-*.csv
+*.wav
+analysis/out/
+
+# Media working files
+media/*
+!media/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
