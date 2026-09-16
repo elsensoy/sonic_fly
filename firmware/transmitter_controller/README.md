@@ -1,9 +1,9 @@
 # transmitter_controller
 
 fire-at-T host <-> Arduino protocol (draft v1, `docs/fire_at_t_protocol.md`).
-Electronic operator of the drone's original handheld transmitter — each
+Electronic operator of the drone's original handheld transmitter :  each
 MOSFET channel shorts one transmitter control to B- when its GPIO is HIGH.
-Target: Arduino Nano clone (CH340 USB-serial), **new** bootloader —
+Target: Arduino Nano clone (CH340 USB-serial), **new** bootloader : 
 `atmega328old` fails to sync on this board.
 
 ## Find the port
@@ -27,9 +27,9 @@ arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:nano:cpu=atmega328 firmwar
 ```
 
 If you get `not in sync: resp=0x0c` errors, you're on the wrong bootloader
-variant — use `cpu=atmega328` (new), not `cpu=atmega328old`.
+variant :  use `cpu=atmega328` (new), not `cpu=atmega328old`.
 
-## Channel map (provisional — only TAKEOFF/D2 is characterised so far)
+## Channel map (provisional :  only TAKEOFF/D2 is characterised so far)
 
 ```
 P  pin 3   power / wake       cooldown 1000ms
@@ -67,12 +67,12 @@ REL <id> <millis>              a scheduled event released its channel
 SAFE linkloss                  no valid line received for 500ms -> transient channels released
 ```
 
-`at` is an absolute timestamp in *this board's* `millis()` — read the current
+`at` is an absolute timestamp in *this board's* `millis()` :  read the current
 value from a `PING` reply first, then schedule relative to that.
 `dur` is clipped to `MAX_PULSE_MS` (500ms); `at` must be 5–3000ms ahead of now
 (`MIN_LEAD_MS`/`MAX_HORIZON_MS`).
 
-Example — read the clock, arm, then take off 200ms later for a 300ms pulse:
+Example :  read the clock, arm, then take off 200ms later for a 300ms pulse:
 
 ```
 PING 1
@@ -90,7 +90,7 @@ arduino-cli monitor -p /dev/ttyUSB0 -c baudrate=115200
 
 Type a command and press Enter, e.g. `HELLO`.
 
-Scripted, via pyserial (`pip install pyserial`) — e.g. round-trip a PING:
+Scripted, via pyserial (`pip install pyserial`) :  e.g. round-trip a PING:
 
 ```
 python3 - <<'EOF'

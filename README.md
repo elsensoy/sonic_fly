@@ -1,23 +1,22 @@
 # Acoustic Physical AI Micro-Drone
 
-> Reverse-engineering a low-cost toy drone into a programmable physical-AI platform for real-time audio perception, motion planning, and music-responsive flight.
+> I took a cheap toy drone and turned it into a programmable robot that listens to music and moves along with it in real time.
 
 ![The 2D rehearsal visualizer, mid-track: drone state, perception telemetry, the decision policy, and the scheduled command stream, all driven by a live audio feed](docs/Screenshot.png)
 
-*The 2D visualizer above is a rehearsal tool, not a mockup — it renders the exact
-transmitter-contact stream the real Arduino would receive, driven by whatever
-track you play it.*
+*The screenshot above is not a mockup. It is a rehearsal tool that shows the exact
+button presses the real Arduino would send to the drone's controller while a song plays.*
 
 ## Highlights
 
 ![Final Drone Wiring Picture](docs/picture.jpg)
 
-* **A $10 "broken" toy drone, made programmable** — no RF protocol reverse-engineering, no replacement flight controller. The original handheld transmitter is driven electronically instead, so the drone's existing radio link, stabilization, and motor control stay untouched.
-* **Two-speed perception** — a classical beat/onset PLL running at ~31 Hz for tight timing, alongside a GPU semantic branch (DALI mel front-end + LAION CLAP zero-shot encoder) at ~2 Hz for *what kind* of musical moment is happening — on its own CUDA stream so a slow inference never stalls the timing path.
-* **Predictive, not reactive, actuation** — commands are scheduled for the *next predicted* beat and fired by a 1 kHz timer ISR on the Arduino itself, so a busy host loop can't jitter the timing.
-* **Safety lives on the hardware** — per-channel cooldowns, mutual exclusion, a concurrency cap, and a link watchdog are enforced on the Arduino, independent of whatever the perception layer asks for.
-* **Watch it decide, live** — the 2D visualizer plays the track over your speakers while showing the same channel stream the physical drone would get, plus the telemetry and scheduler decisions behind each command.
-* **Tested and pinned** — ~96 tests, a 3-track behavioural snapshot, and a frozen choreography policy (tag `policy-v1`) so hardware bring-up is the only moving variable left.
+* **A $10 "broken" drone, made programmable.** I did not crack the drone's radio signal or replace its flight computer. Instead, a small circuit presses the buttons on the original handheld controller electronically. The drone's own radio, balance system, and motors keep working exactly as they were designed to.
+* **Two ways of listening at once.** A fast beat tracker runs about 31 times per second to catch the rhythm. A slower AI model runs on the graphics card about twice per second to figure out what kind of music is playing, such as heavy, calm, or building up. The two run separately, so a slow AI answer never throws off the beat timing.
+* **It moves on the beat, not after it.** The software predicts when the next beat will land and schedules the move ahead of time. The Arduino then fires the button press at the exact moment using its own precise timer, so a busy laptop cannot make the timing sloppy.
+* **Safety rules live on the hardware.** The Arduino enforces its own limits, such as rest time between presses, blocking opposite moves at the same time, capping how many buttons are held at once, and stopping everything if the laptop connection goes quiet. These rules apply no matter what the AI asks for.
+* **You can watch it think.** The 2D visualizer plays the song through your speakers and shows the same button presses the real drone would receive, along with the reasoning behind each move.
+* **Tested and locked down.** There are about 96 automated tests, a saved behaviour check across three songs, and a frozen version of the dance logic (tag `policy-v1`). 
 
 ## Quick Start
 
@@ -27,61 +26,70 @@ source .venv/bin/activate
 python -m host.sim.visualizer --source media/track.wav
 ```
 
-Opens the 2D visualizer window and plays `track.wav` through your speakers,
-in sync. Useful variants:
+This opens the 2D visualizer and plays `track.wav` through your speakers so the
+visuals and the music stay in sync. Here are some other ways to run it:
 
 ```bash
-# full choreography, driven by the CLAP semantic model (downloads ~2GB on first run)
+# Full dance mode using the CLAP music model (downloads about 2 GB the first time)
 python -m host.sim.visualizer --source media/track.wav --model --encoder clap
 
-# a different track
+# Use a different song
 python -m host.sim.visualizer --source media/track_2.wav
 
-# silent (no speaker playback, just the visuals)
+# Run silently (visuals only, no sound from the speakers)
 python -m host.sim.visualizer --source media/track.wav --no-play
 
-# drive the real Arduino instead of the on-screen simulated drone
+# Control the real Arduino instead of the on-screen drone
 python -m host.sim.visualizer --source media/track.wav --port /dev/ttyUSB0
 ```
 
-In the window: **Space** stops the drone, **Esc** or closing the window exits.
-More runnable commands (analysis scripts, firmware) are under
-[Running It](#running-it) further down.
+While the window is open, press **Space** to stop the drone. Press **Esc** or close the
+window to quit. You can find more commands in the [Running It](#running-it) section.
 
 ## Contents
 
 * [Overview](#overview)
-* [Project Motivation](#project-motivation)
-* [System Architecture](#system-architecture)
-* [Reverse Engineering the Transmitter](#reverse-engineering-the-transmitter)
-* [Analog Switch Control Interface](#analog-switch-control-interface)
-* [Electronic Button Emulation](#electronic-button-emulation)
-* [Host-to-Arduino Protocol](#host-to-arduino-protocol)
-* [Physical AI Branch](#physical-ai-branch)
-* [Audio Perception Pipeline](#audio-perception-pipeline)
-* [Motion Primitives](#motion-primitives)
-* [Safety and Command State Machine](#safety-and-command-state-machine)
-* [Temporal Alignment](#temporal-alignment)
-* [Current Development Status](#current-development-status)
-* [Software Structure](#software-structure)
+* [Why I Built This](#why-i-built-this)
+* [How the System Fits Together](#how-the-system-fits-together)
+* [Figuring Out the Controller](#figuring-out-the-controller)
+* [Using an Analog Switch Instead of a MOSFET](#using-an-analog-switch-instead-of-a-mosfet)
+* [How the Arduino Presses a Button](#how-the-arduino-presses-a-button)
+* [How the Laptop Talks to the Arduino](#how-the-laptop-talks-to-the-arduino)
+* [Adding the AI Layer](#adding-the-ai-layer)
+* [How the Drone Listens to Music](#how-the-drone-listens-to-music)
+* [Motion Building Blocks](#motion-building-blocks)
+* [Safety Rules](#safety-rules)
+* [Moving on the Beat](#moving-on-the-beat)
+* [Where the Project Stands](#where-the-project-stands)
+* [Project Layout](#project-layout)
 * [Running It](#running-it)
-* [Earlier Acoustic Command Experiment](#earlier-acoustic-command-experiment) *(legacy, kept for comparison)*
-* [Experimental Questions](#experimental-questions)
-* [Future Work](#future-work)
+* [The Earlier Sound Command Experiment](#the-earlier-sound-command-experiment) *(older work, kept for comparison)*
+* [Questions This Project Explores](#questions-this-project-explores)
+* [Future Ideas](#future-ideas)
 * [Design Philosophy](#design-philosophy)
 * [Disclaimer](#disclaimer)
 
 ## Overview
 
-This project turns a used ~$10 toy drone into a programmable robotics platform without replacing its existing radio, flight controller, motor drivers, or stabilization electronics.
+This project turns a used toy drone that cost about $10 into a programmable robot. I did
+not replace any of its parts. The radio, the flight computer, the motor drivers, and the
+balance system are all still the originals.
 
-Instead of attempting to reverse-engineer the drone's proprietary RF protocol, the system electronically emulates the original handheld transmitter controls.
+Most people who want to program a drone like this would try to decode the secret radio
+signal it uses. I took a simpler route. I left the radio alone and taught a computer to
+press the buttons on the original handheld controller.
 
-An Arduino Nano acts as the low-level hardware interface. CD4066 analog switches reproduce physical button and joystick switch closures on the transmitter PCB, allowing software commands to control the original transmitter.
+Here is how the pieces work together:
 
-A laptop equipped with an NVIDIA RTX 5060 provides the high-level compute layer. It listens to live music, performs real-time audio analysis and GPU-accelerated inference, interprets musical structure, selects motion primitives, and sends compact commands over USB serial to the Arduino.
+* An **Arduino Nano** is the small board that does the physical work.
+* **CD4066 analog switch chips** act like tiny electronic fingers. They connect the button
+  contacts on the controller's circuit board, which is exactly what happens when you press
+  a button with your thumb.
+* A **laptop with an NVIDIA RTX 5060 graphics card** does the thinking. It listens to music,
+  analyzes it, decides how the drone should move, and sends short commands to the Arduino
+  over a USB cable.
 
-The result is a heterogeneous robotics system:
+The full chain looks like this:
 
 ```text
 Audio
@@ -89,9 +97,9 @@ Audio
   ▼
 RTX 5060 Laptop
   │
-  │  audio perception
-  │  temporal inference
-  │  motion selection
+  │  listens to the music
+  │  predicts the beat
+  │  picks a move
   │
   ▼
 USB Serial
@@ -99,110 +107,109 @@ USB Serial
   ▼
 Arduino Nano
   │
-  │  deterministic command timing
-  │  analog switch (CD4066) actuation
+  │  precise timing
+  │  presses buttons through the CD4066 switches
   │
   ▼
-Original Drone Transmitter
+Original Drone Controller
   │
-  │  original RF protocol
+  │  original radio signal
   ▼
-Drone Flight Controller
+Drone Flight Computer
   │
-  │  stabilization
-  │  motor mixing
+  │  keeps the drone balanced
+  │  mixes power between motors
   ▼
 Four Motors
 ```
 
-The project is intentionally split between high-level and low-level computation:
+Each part has one clear job:
 
-* **RTX 5060:** perception, inference, musical interpretation, behavior selection
-* **Arduino Nano:** command timing and hardware actuation
-* **Original transmitter:** RF communication
-* **Original drone PCB:** stabilization, motor mixing, and motor control
+* **The laptop** listens, thinks, and chooses what to do.
+* **The Arduino** handles timing and presses the buttons.
+* **The original controller** sends the radio signal.
+* **The original drone** keeps itself stable and drives the motors.
 
-This allows a discarded consumer device to become a programmable Physical AI platform while preserving the engineering already present in the original aircraft.
+Splitting the work this way lets a thrown-away toy become a real AI robot while keeping
+all the engineering that was already built into it.
 
 ---
 
-# Project Motivation
+## Why I Built This
 
-A programmable drone normally provides an SDK, documented protocol, or accessible flight controller.
+A drone you can program usually comes with a software kit, published instructions, or a
+flight computer you can access. This drone came with none of those.
 
-This drone provides none of those.
-
-The platform began as a seller-described non-working toy purchased for approximately $10. Testing showed that the aircraft, transmitter, RF link, stabilization system, and motors were still functional.
+I bought it for about $10 from a seller who said it did not work. When I tested it, I
+found that the drone, the controller, the radio link, the balance system, and the motors
+all worked fine.
 
 ![Seller Claiming Drone Wouldn't Work](docs/claim.png)
 
-That created a different engineering problem:
+That left me with an interesting challenge:
 
-> How can an undocumented consumer device be converted into a programmable robotic system without rebuilding its flight electronics from scratch?
+> How do you turn a device with no documentation into a programmable robot without rebuilding its electronics from scratch?
 
-The chosen solution is to intercept the system at the **human input boundary**.
+My answer was to connect at the point where a person normally touches it, which is the
+buttons on the controller.
 
-Instead of recreating the RF protocol:
+The hard way would have been to build my own radio and copy the drone's signal:
 
 ```text
-Arduino -> custom RF implementation -> drone
+Arduino -> homemade radio -> drone
 ```
 
-the project retains the original radio link:
+Instead, I kept the original radio:
 
 ```text
 Arduino
    │
    ▼
-electronic switch emulation
+electronic button presses
    │
    ▼
-original transmitter
+original controller
    │
    ▼
-original RF link
+original radio link
    │
    ▼
 original drone electronics
 ```
 
-This considerably reduces the reverse-engineering surface.
+This saves an enormous amount of work. I did **not** have to figure out:
 
-The project does **not** need to reconstruct:
+* how the radio messages are structured
+* how the controller pairs with the drone
+* the software that keeps the drone balanced
+* the math that keeps it level in the air
+* how power gets split between the four motors
+* how the motor driver circuits work
 
-* proprietary RF packet structure
-* channel pairing
-* stabilization firmware
-* attitude-control loops
-* motor mixing
-* motor-driver electronics
+I only had to answer one question:
 
-It only needs to determine:
-
-> What electrical event does each physical transmitter control generate?
+> What electrical signal does each button or stick on the controller create?
 
 ---
 
-# System Architecture
-
-## High-Level Architecture
+## How the System Fits Together
 
 ```text
                          ┌──────────────────────────────┐
                          │       AUDIO SOURCE           │
-                         │ microphone / live music      │
+                         │ microphone or live music     │
                          └──────────────┬───────────────┘
                                         │
                                         ▼
                          ┌──────────────────────────────┐
                          │       RTX 5060 LAPTOP        │
                          │                              │
-                         │  Audio acquisition           │
-                         │  Beat / onset detection      │
-                         │  Spectral analysis           │
-                         │  GPU audio inference         │
-                         │  Musical-state estimation    │
-                         │  Motion-primitive selection  │
+                         │  Records the audio           │
+                         │  Finds beats and hits        │
+                         │  Looks at frequencies        │
+                         │  Runs the AI music model     │
+                         │  Works out the music's mood  │
+                         │  Picks a move                │
                          └──────────────┬───────────────┘
                                         │
                                    USB Serial
@@ -211,34 +218,34 @@ It only needs to determine:
                          ┌──────────────────────────────┐
                          │       ARDUINO NANO           │
                          │                              │
-                         │  Serial command parser       │
-                         │  State machine               │
-                         │  Command timing              │
-                         │  GPIO output                 │
+                         │  Reads commands              │
+                         │  Tracks what is happening    │
+                         │  Times each press            │
+                         │  Switches its output pins    │
                          └──────────────┬───────────────┘
                                         │
                                         ▼
                          ┌──────────────────────────────┐
-                         │  ANALOG SWITCH INTERFACE     │
+                         │  ANALOG SWITCH CHIPS         │
                          │       (CD4066)               │
-                         │ electronic button / stick    │
-                         │ contact emulation            │
+                         │ electronic button and stick  │
+                         │ presses                      │
                          └──────────────┬───────────────┘
                                         │
                                         ▼
                          ┌──────────────────────────────┐
-                         │  ORIGINAL RF TRANSMITTER     │
+                         │  ORIGINAL RADIO CONTROLLER   │
                          └──────────────┬───────────────┘
                                         │
-                                       RF
+                                      Radio
                                         │
                                         ▼
                          ┌──────────────────────────────┐
                          │       ORIGINAL DRONE         │
                          │                              │
-                         │ receiver                     │
-                         │ flight controller            │
-                         │ stabilization                │
+                         │ radio receiver               │
+                         │ flight computer              │
+                         │ balance system               │
                          │ motor drivers                │
                          └──────────────┬───────────────┘
                                         │
@@ -248,92 +255,93 @@ It only needs to determine:
 
 ---
 
-# Reverse Engineering the Transmitter
+## Figuring Out the Controller
 
-## Why the Transmitter Is the Interface
+### Why the controller is the way in
 
-The original handheld transmitter already knows how to communicate with the drone.
+The handheld controller already knows how to talk to the drone. So instead of replacing
+it, I made the Arduino act like an **electronic pilot** that presses its buttons.
 
-Rather than replacing it, the Arduino behaves like an **electronic operator** of the existing controls.
-
-The transmitter PCB exposes recognizable power markings:
+The controller's circuit board has a few helpful labels printed on it:
 
 ```text
 B+    battery positive
-B-    battery negative / controller ground
-ANT   RF antenna connection
+B-    battery negative (the controller's ground)
+ANT   antenna connection
 ```
 
-The first control characterized was the takeoff/start button.
+The first button I studied was the takeoff button.
 
-With the transmitter powered off, resistance was measured between each button contact and `B-`.
-
-Example measurements:
+With the controller turned off, I used a multimeter to measure the resistance between each
+side of the button and `B-`. Here is what I found:
 
 ```text
-button pad A -> B- ≈ 0 Ω
-button pad B -> B- ≈ 2.58 kΩ
+button side A -> B- ≈ 0 Ω
+button side B -> B- ≈ 2.58 kΩ
 ```
 
-This indicates that one side of the physical switch is connected to ground while the other is a controller signal.
+Side A reads almost zero, which means it is connected directly to ground. Side B reads a
+higher value, which means it is a signal line going to the controller's chip.
 
-The physical control therefore behaves approximately like:
+So the button works roughly like this:
 
 ```text
 controller signal
        │
        │
-    [ switch ]
+    [ button ]
        │
        ▼
       GND
 ```
 
-Pressing the button connects the controller signal to ground.
+When you press the button, it connects the signal line to ground. The controller's chip
+sees that change and knows the button was pressed.
 
-This is useful because the same action can be reproduced electronically.
+This is great news, because a circuit can make that same connection without anyone
+touching the button.
 
 ---
 
-# Analog Switch Control Interface
+## Using an Analog Switch Instead of a MOSFET
 
-A **CD4066** quad bilateral analog switch is used as the electronic switch, one
-channel per transmitter control.
+Each button or stick direction on the controller gets its own channel on a **CD4066**
+chip. This chip contains four small electronic switches.
 
-## Why an analog switch instead of a MOSFET
+### Why I chose an analog switch
 
-The initial characterization (resistance from one button pad to `B-`) only
-confirmed a switch-to-ground topology for the single takeoff button that was
-probed. An N-MOSFET is a natural fit for *that* case: its source sits at
-ground and it only needs to pull one signal down to `B-`.
+My first test only checked one button, and that button connected to ground when pressed.
+For a button like that, a MOSFET (a common type of transistor) works well. It can pull
+one wire down to ground on command.
 
-It's not yet established that every control on this PCB works the same way.
-Joystick and multi-button transmitters wire their contacts as a
-**scan matrix** — rows and columns shared across several buttons, with no
-single side tied to ground. A MOSFET can't safely emulate a press between two
-arbitrary, possibly-floating matrix nodes: it assumes a ground-referenced
-source. A CD4066 channel is a bilateral pass switch — it connects two nodes
-without caring which one (if either) is at ground — so it emulates a contact
-closure correctly whether the underlying topology turns out to be
-switch-to-`B-` or a row/column matrix. 
+The problem is that I do not yet know if every control on this board works the same way.
+Controllers with joysticks and many buttons often use a **button grid**, also called a
+scan matrix. In a grid, buttons share row and column wires, and neither side of a button
+is necessarily connected to ground. A MOSFET expects one side to be at ground, so it
+cannot reliably press a button in a grid like this.
 
-## Wiring (as built, `firmware/analog_switch/analog_switch.ino`)
+A CD4066 switch is different. It simply connects two points together, and it does not
+care whether either point is at ground. That means it will work correctly no matter which
+wiring style the rest of the controller turns out to use.
+
+### Wiring as built (`firmware/analog_switch/analog_switch.ino`)
 
 ```text
-Nano 5V  ──────────────── 4066 pin 14 (Vdd)
-Nano GND ──────────────── 4066 pin 7  (Vss)  ── controller battery − (common ref)
+Nano 5V  ──────────────── 4066 pin 14 (Vdd, power)
+Nano GND ──────────────── 4066 pin 7  (Vss, ground) ── controller battery − (shared ground)
 Nano D4  ──────────────── 4066 pin 13 (control A)     HIGH = switch closed
-4066 pin 1 / pin 2 ─────── probe wires across the two button pads
+4066 pin 1 / pin 2 ─────── wires to the two sides of the button
 ```
 
-Each additional channel uses one more of the CD4066's four switch pairs and
-one more Nano GPIO as its control line. Unused control pins (4066 pins 5, 6,
-12) must be tied to `Vss` (pin 7) — a floating CD4066 control input makes the
-whole chip behave erratically, not just the unused channel.
+Every extra button uses one more of the four switches on the CD4066 and one more pin on
+the Nano to control it.
 
-The controller remains powered by its **own battery**. The Arduino does not
-supply power to the transmitter. The shared ground only provides a common
-electrical reference:
+One important tip: the control pins you are not using (4066 pins 5, 6, and 12) must be
+connected to ground (pin 7). If you leave a control pin unconnected, the whole chip can
+act unpredictably, not just the unused switch.
+
+The controller still runs on **its own battery**. The Arduino does not power it. The two
+boards only share a ground wire so that they agree on what "zero volts" means:
 
 ```text
 Arduino GND ───────── Controller B-
@@ -341,9 +349,12 @@ Arduino GND ───────── Controller B-
 
 ---
 
-# Electronic Button Emulation
+## How the Arduino Presses a Button
 
-From the Arduino's perspective, each transmitter control becomes a GPIO-controlled switch.
+From the Arduino's point of view, every control on the controller is just a pin it can
+turn on or off.
+
+When the pin is off (LOW), the button is released:
 
 ```text
 GPIO LOW
@@ -352,11 +363,13 @@ GPIO LOW
 switch OPEN
    │
    ▼
-button pads disconnected from each other
+the two sides of the button are not connected
    │
    ▼
 button released
 ```
+
+When the pin is on (HIGH), the button is pressed:
 
 ```text
 GPIO HIGH
@@ -365,13 +378,13 @@ GPIO HIGH
 switch CLOSED
    │
    ▼
-button pads connected together
+the two sides of the button are connected
    │
    ▼
 button pressed
 ```
 
-The eventual transmitter abstraction is intended to expose commands such as:
+The goal is to support a full set of controls like these:
 
 ```text
 POWER
@@ -386,31 +399,30 @@ ROLL_LEFT
 ROLL_RIGHT
 ```
 
-The physical implementation may evolve as additional joystick contacts are characterized.
+The exact wiring may change as I finish mapping the joystick contacts.
 
 ---
 
-# Host-to-Arduino Protocol
+## How the Laptop Talks to the Arduino
 
-The Arduino is intentionally unaware of music, neural networks, or semantic audio information.
+The Arduino knows nothing about music or AI. It just follows simple text commands sent
+over the USB cable.
 
-It receives simple commands over serial.
-
-An early protocol can be represented as:
+An early version of the command set looked like this:
 
 ```text
-P   power / wake
-T   takeoff
+P   power on
+T   take off
 U   throttle up
 D   throttle down
 L   left
 R   right
 F   forward
 B   backward
-S   stop / release
+S   stop and release everything
 ```
 
-Conceptually:
+For example, when the laptop sends the letter "U", this happens:
 
 ```text
 Python
@@ -423,18 +435,19 @@ USB Serial
 Arduino Nano
   │
   ▼
-THROTTLE_UP GPIO
+THROTTLE_UP pin turns on
   │
   ▼
-analog switch (CD4066)
+CD4066 switch closes
   │
   ▼
-transmitter stick contact
+controller stick contact is pressed
 ```
 
-This creates a clean hardware abstraction between the physical drone and the high-level software.
+This keeps the hardware and the software cleanly separated.
 
-The host should eventually interact with an API such as:
+Eventually, the rest of the code will not deal with raw letters at all. It will use
+simple, readable functions like these:
 
 ```python
 drone.takeoff()
@@ -443,17 +456,15 @@ drone.yaw_left(duration_ms=80)
 drone.hover()
 ```
 
-rather than manipulating serial bytes directly throughout the perception code.
-
 ---
 
-# Physical AI Branch
+## Adding the AI Layer
 
-## Goal
+### The goal
 
-The second stage of the project uses the reverse-engineered drone as a physical output device for real-time music perception.
+The second half of this project uses the drone as a way to physically express music.
 
-The goal is **not** simply:
+I did **not** want something as simple as this:
 
 ```text
 bass -> left
@@ -461,186 +472,195 @@ treble -> right
 beat -> up
 ```
 
-That produces a reactive audio visualizer.
-
-Instead, the project treats music interpretation and physical expression as a small perception-planning-control problem.
+That would just be a music visualizer that happens to fly. Instead, I treat the problem
+the way a robot would. It has to understand what it hears, plan what to do, and then
+carry out the plan safely.
 
 ```text
 audio
   │
-  ├─► DSP branch  (beat / onset / energy, ~31 Hz)  ──► predict_next_beat ─┐   WHEN
+  ├─► beat tracker (about 31 times per second) ──► predict the next beat ─┐   WHEN to move
   │                                                                       │
-  └─► semantic branch  (DALI mel -> CLAP, ~2 Hz, own CUDA stream)          │
+  └─► AI music model (about 2 times per second, separate GPU lane)        │
                      │                                                    │
-              musical state (texture · energy · section)                  │
+              what the music feels like (texture, energy, section)        │
                      │                                                    │
                      ▼                                                    │
-              motion policy  (texture×energy -> family -> primitive) ◄──────┘   WHAT
+              dance logic (feel -> style -> specific move) ◄──────────────┘   WHAT move to make
                      │
                      ▼
-              PhysicalScheduler  (min interval · cooldown · conflict · priority)
+              PhysicalScheduler (spacing, rest time, conflicts, priority)
                      │
                      ▼
-              ScheduledController ──► fire-at-T ──► transmitter ──► drone
+              ScheduledController ──► fire at an exact time ──► controller ──► drone
 ```
 
-As built: `docs/audio_model.md` (semantic branch), `docs/translation_engine.md`
-(policy), `docs/fire_at_t_protocol.md` (scheduling).
+You can read the full details in these documents:
+
+* `docs/audio_model.md` explains the AI music model.
+* `docs/translation_engine.md` explains how music gets turned into moves.
+* `docs/fire_at_t_protocol.md` explains how commands are timed.
 
 ---
 
-# Audio Perception Pipeline
+## How the Drone Listens to Music
 
-The audio system contains two complementary paths.
+The listening system has two paths that work side by side.
 
 ```text
                          microphone
                              │
                              ▼
-                       audio window
+                     a short slice of audio
                              │
                 ┌────────────┴────────────┐
                 │                         │
                 ▼                         ▼
-       deterministic DSP          GPU audio model
+       classic signal math          AI model on the GPU
                 │                         │
-       beat / onset / BPM        semantic embedding
-       energy / spectrum         mood / texture
-       transient detection       musical context
+       beats, hits, tempo         a summary of the sound
+       loudness, frequencies      mood and texture
+       sudden sharp sounds        musical context
                 │                         │
                 └────────────┬────────────┘
                              │
                              ▼
-                     musical-state model
+                  overall picture of the music
                              │
                              ▼
-                       motion policy
+                        dance logic
 ```
 
-The two branches answer different questions.
+Each path answers a different question.
 
-### Deterministic signal processing
+### Classic signal math
 
-Answers:
+This path answers the question:
 
-> **When should motion occur?**
+> **When should the drone move?**
 
-Candidate features include:
+It looks at things like:
 
-* beat timing
-* onset timing
-* tempo
-* broadband energy
-* low/mid/high-band energy
-* spectral changes
-* transient strength
+* when each beat happens
+* when a new sound starts
+* the tempo of the song
+* how loud the music is overall
+* how loud the bass, middle, and high sounds are
+* sudden changes in the sound
+* how sharp a hit is
 
-### GPU inference
+The beat tracker works like a metronome that listens. It locks onto the song's tempo and
+keeps predicting where the next beat will fall.
 
-Answers:
+### The AI model
 
-> **What kind of musical event is happening?**
+This path answers the question:
 
-Potential outputs include:
+> **What kind of musical moment is this?**
 
-* learned audio embeddings
-* musical texture
-* energy/intensity class
-* coarse genre characteristics
-* section change
-* mood or semantic state
+It can tell things like:
 
-The RTX 5060 therefore performs more than FFT acceleration. It provides the compute required for learned audio representation and inference while the deterministic signal-processing branch provides accurate timing information.
+* the general character of the sound
+* whether the music is smooth or rough
+* how intense the music is
+* a rough sense of the genre
+* when the song moves into a new section
+* the overall mood
+
+The audio first gets turned into a **mel spectrogram**, which is a picture of how the
+sound's frequencies change over time. NVIDIA's DALI library builds that picture on the
+graphics card. Then a model called **LAION CLAP** compares the sound to written
+descriptions (like "heavy distorted guitar" or "calm piano") and picks the closest match.
+
+So the graphics card is doing much more than basic math. It runs a real AI model to
+understand the music, while the classic signal math keeps the timing precise.
 
 ---
 
-# Motion Primitives
+## Motion Building Blocks
 
-The AI system does not directly command motors.
+The AI never controls the motors directly.
 
-Instead, perception selects from a small library of safe, pre-defined physical behaviors.
+Instead, it picks from a small list of safe, pre-built moves.
 
-Example mapping:
+Here is an example of how music can map to moves:
 
-| Musical event            | Motion primitive                 |
-| ------------------------ | -------------------------------- |
-| Strong beat              | Vertical pulse                   |
-| Bass onset               | Short downward accent            |
-| High-frequency transient | Brief yaw twitch                 |
-| Rising energy            | Increasing motion amplitude      |
-| Section transition       | Change choreography              |
-| Quiet passage            | Hover / restrained movement      |
-| Sustained high energy    | Alternating lateral movement     |
-| Musical drop             | Short climb followed by recovery |
+| What the music is doing          | What the drone does                  |
+| -------------------------------- | ------------------------------------ |
+| A strong beat                    | Bobs up and down                     |
+| A deep bass hit                  | Dips down briefly                    |
+| A sharp high sound               | Twitches left or right               |
+| Energy building up               | Moves bigger and bigger              |
+| A new section of the song        | Switches to a different dance style  |
+| A quiet part                     | Hovers or moves gently               |
+| Long stretch of high energy      | Sways from side to side              |
+| The drop                         | Climbs quickly, then settles         |
 
-The architecture becomes:
+The overall flow looks like this:
 
 ```text
-audio perception
+listen to the audio
       │
       ▼
- musical state
+understand the music
       │
       ▼
-motion primitive
+pick a move
       │
       ▼
-trajectory / state machine
+plan the move step by step
       │
       ▼
-transmitter command sequence
+send the button presses to the controller
 ```
 
-This isolates perception from actuation.
-
-It also allows motion primitives to be tested independently before an AI system is permitted to select them.
+This keeps the listening part completely separate from the moving part. It also means
+each move can be tested by itself before the AI is allowed to choose it.
 
 ---
 
-# Safety and Command State Machine
+## Safety Rules
 
-The low-level controller should enforce constraints independently of the perception layer.
+The Arduino has its own safety rules that it follows no matter what the laptop says.
 
-The host may request a behavior, but a safety/state layer determines whether it is valid.
-
-Conceptually:
+The laptop can ask for a move, but the safety layer decides whether that move is allowed.
 
 ```text
-requested primitive
+requested move
         │
         ▼
-┌───────────────────┐
-│ safety validation │
-│                   │
-│ command duration  │
-│ cooldown          │
-│ mutually-exclusive│
-│ inputs            │
-│ altitude limits*  │
-└─────────┬─────────┘
+┌─────────────────────┐
+│ safety check        │
+│                     │
+│ how long it lasts   │
+│ rest time           │
+│ opposite moves      │
+│ at the same time    │
+│ height limits*      │
+└─────────┬───────────┘
           │
           ▼
-Arduino command
+Arduino carries it out
 ```
 
-`*` Closed-loop altitude constraints require external sensing and are a future extension.
+`*` Height limits will need an outside sensor, such as a camera, so that is planned for later.
 
-This prevents the audio model from having unrestricted access to raw actuator commands.
+This keeps the AI from ever having unlimited control over the drone.
 
 ---
 
-# Temporal Alignment
+## Moving on the Beat
 
-A reactive system detects a beat and only then begins the actuation chain:
+A simple system waits to hear a beat and only then starts reacting:
 
 ```text
-beat detected
+beat is heard
      │
      ▼
-decision
+decision is made
      │
      ▼
-USB serial
+USB cable
      │
      ▼
 Arduino
@@ -649,152 +669,166 @@ Arduino
 analog switch
      │
      ▼
-transmitter
+controller
      │
      ▼
-RF
+radio signal
      │
      ▼
-drone motion
+drone moves
 ```
 
-Every stage introduces latency.
+Every step in that chain adds a little delay. By the time the drone moves, the beat has
+already passed.
 
-If the total measured delay between perception and observable motion is \(L\), and the estimated beat period is \(T\), then the next expected beat after beat \(k\) is
+To fix this, the system predicts the future. If the total delay from hearing to moving is
+\(L\), and the time between beats is \(T\), then the next beat after beat \(k\) will land at
 
 $$
 t_{\text{next}} = t_k + T
 $$
 
-and the command can be issued at approximately
+To land the move right on that beat, the command should be sent a little early, at
 
 $$
 t_{\text{cmd}} = t_{\text{next}} - L.
 $$
 
-This converts the problem from purely reactive beat detection into **predictive physical synchronization**.
+In plain words: figure out when the next beat will happen, subtract the delay, and send
+the command at that moment. This turns the system from one that reacts late into one that
+moves in sync.
 
-A useful evaluation metric is therefore:
+A good way to measure the improvement is to compare the two approaches:
 
 ```text
-Reactive controller
-mean beat-to-motion timing error: _____ ms
+Reacting after the beat
+average timing error: _____ ms
 
-Predictive controller
-mean beat-to-motion timing error: _____ ms
+Predicting the beat
+average timing error: _____ ms
 ```
 
-This experiment is planned once the actuator interface and basic music-response pipeline are operational.
+I plan to run this test on the real drone once the hardware is fully connected.
 
 ---
 
-# Current Development Status
+## Where the Project Stands
 
-### Hardware / firmware
-* [x] Verify drone + RF transmitter operation; identify transmitter power / ground; characterise initial button contacts; demonstrate switch-to-ground topology
-* [x] MOSFET-based Arduino interface designed; shared reference ground; first GPIO-controlled transmitter channels
-* [x] Switched to a CD4066 analog-switch interface (`firmware/analog_switch/analog_switch.ino`) — the full button/joystick network's topology isn't characterised yet and may turn out to be a scan matrix rather than switch-to-`B-`; a bilateral analog switch emulates a contact closure correctly either way, where a ground-referenced MOSFET would not
-* [ ] Finish mapping joystick directions · complete the analog-switch channel bank
-* [x] `transmitter_controller.ino` — fire-at-T protocol: line parser, 1 kHz timer-ISR event scheduler, clock sync, per-channel cooldown / mutual-exclusion / concurrency, link watchdog (`docs/fire_at_t_protocol.md`)
-* [~] Validate PC -> Arduino -> transmitter -> drone — full stack runs against `host/sim/fake_arduino.py`; real hardware pending
+### Hardware and firmware
 
-### Host control stack
-* [x] `DroneScheduler` + `ScheduledController` — host owns a clock model (offset -> linear drift), schedules `SCHED <id> <at> …`, tracks ACK/NAK -> FIRE -> REL
-* [x] `predict_next_beat()` PLL + fire-at-T scheduling — predictive, not reactive
-* [x] `PhysicalScheduler` feasibility layer — candidate -> min-interval / cooldown / conflict / priority -> emit-or-drop, with a per-reason tally
-* [~] Actuation latency — reactive-vs-predictive + per-stage profile in sim (`docs/latency_experiment.md`, `analysis/pipeline_profile.py`); RF/mechanical tail needs hardware
+* [x] Confirmed the drone and controller work. Found the controller's power and ground. Studied the first buttons and confirmed they connect to ground when pressed.
+* [x] Designed a first Arduino interface using MOSFETs. Connected a shared ground and got the first buttons working from the Arduino.
+* [x] Switched to CD4066 analog switches (`firmware/analog_switch/analog_switch.ino`). The rest of the controller's wiring has not been fully mapped yet and may use a button grid. An analog switch works either way, while a MOSFET would not.
+* [ ] Finish mapping the joystick directions and wire up the full set of switches.
+* [x] Built `transmitter_controller.ino`, which handles timed commands. It reads commands, uses a timer that ticks 1,000 times per second to fire presses on time, keeps its clock in sync with the laptop, enforces rest times and safety rules, and stops everything if the laptop goes quiet (`docs/fire_at_t_protocol.md`).
+* [ ] **In progress:** Test the full path from laptop to Arduino to controller to drone. The whole system already runs against a simulated Arduino (`host/sim/fake_arduino.py`). Testing on real hardware is next.
 
-### Perception
-* [x] Mic / wav / synth acquisition (`host/audio/capture.py`, `sources.py`)
-* [x] Beat / onset detector — spectral flux + phase-locked loop (`host/audio/beat_detector.py`)
-* [x] GPU semantic branch — DALI GPU mel + `ThreadedAudioModel` on its own CUDA stream; pluggable `AudioEncoder` (`RandomProjection` default, `ClapEncoder` = LAION CLAP zero-shot, ~35 ms); smoothed, margin-gated `texture` / `energy`; windowed-novelty section detection (`docs/audio_model.md`)
-* [x] Decoupling proven — 500 ms injected inference leaves `|scheduling error|` and DSP latency unmoved (`pipeline_profile.py --prove`); semantic-age-at-command telemetry
+### Laptop control software
 
-### Choreography
-* [x] Command translation engine — `AudioFeatures` -> `MusicState` -> `MotionCommand` (`docs/translation_engine.md`)
-* [x] `texture × energy` -> 5 motion families (HOLD / DRIFT / SWAY / PULSE / SLAM), each with its own primitive palette; beat/onset stays the clock
-* [x] `PhysicalScheduler` feasibility gate — SLAM vs other min interval, per-primitive cooldown, still-running conflict, max envelope, max run on one axis; drop tally by reason
-* [x] Semantic choreography differs by track — metal -> SLAM 92 %, DIP/BOUNCE_HARD/YAW @ ~90 cmd/min; melodic -> SWAY, soft BOUNCE/sway/RISE @ ~75 cmd/min — while the beat-only baseline uses the same mix for both (`analysis/choreo_compare.py --baseline`)
-* [x] **Policy frozen** as of tag `policy-v1`. `decide()` / `_decide_semantic()` / `_FAMILY_GRID` / the scheduler constants / the CLAP prompts + pinned revision are fixed. Any change needs `pytest -m slow tests/test_policy_snapshot.py` (the 3-track behavioural band check) re-run and re-baselined. Hardware is the next moving variable, not the policy.
+* [x] Built `DroneScheduler` and `ScheduledController`. The laptop keeps track of the Arduino's clock, schedules each command for an exact time, and follows each command from accepted, to fired, to released.
+* [x] Built the beat predictor (`predict_next_beat()`) and scheduled commands ahead of time instead of reacting late.
+* [x] Built the `PhysicalScheduler`, which checks each suggested move for spacing, rest time, conflicts, and priority. It then sends or skips the move and keeps count of why moves were skipped.
+* [ ] **In progress:** Measure the delay. I compared reacting and predicting in simulation and measured each step (`docs/latency_experiment.md`, `analysis/pipeline_profile.py`). The radio and mechanical delays still need to be measured on the real drone.
+
+### Listening
+
+* [x] Audio can come from a microphone, a WAV file, or a generated test signal (`host/audio/capture.py`, `sources.py`).
+* [x] Built the beat detector using changes in the sound's frequencies plus a tempo-locking tracker (`host/audio/beat_detector.py`).
+* [x] Built the AI music path on the graphics card. It has its own lane on the GPU and supports different models. The default is a simple test model, and the main one is LAION CLAP, which takes about 35 ms per run. Results are smoothed so they do not flicker, and the system detects when a song changes sections (`docs/audio_model.md`).
+* [x] Proved the two paths do not slow each other down. Even when I added an artificial 500 ms delay to the AI model, the beat timing did not change at all (`pipeline_profile.py --prove`). The system also records how old the AI's answer was when each command was sent.
+
+### Dance logic
+
+* [x] Built the translation engine that turns sound features into a musical state, and then into a move (`docs/translation_engine.md`).
+* [x] The combination of texture and energy picks one of five dance styles: HOLD, DRIFT, SWAY, PULSE, and SLAM. Each style has its own set of moves. The beat still decides when each move happens.
+* [x] The `PhysicalScheduler` safety gate adds minimum spacing (especially for SLAM moves), rest time for each move, blocking of moves that overlap, a limit on move size, and a limit on repeating the same direction. It counts every skipped move and the reason.
+* [x] The AI makes each song look different. A metal track uses the SLAM style 92% of the time, with dips, hard bounces, and turns at about 90 moves per minute. A melodic track mostly uses SWAY, with soft bounces, sways, and rises at about 75 moves per minute. For comparison, a beat-only version uses the same mix of moves for both songs (`analysis/choreo_compare.py --baseline`).
+* [x] **The dance logic is frozen** as of the tag `policy-v1`. The decision code, the style grid, the scheduler settings, and the CLAP text prompts and model version are all locked. Any future change requires re-running the three-song behaviour check (`pytest -m slow tests/test_policy_snapshot.py`) and saving new results. From here on, the hardware is the only thing that should change.
 
 ### Demo
-* [x] 2D visualizer — drone sprite driven by the real channel state + telemetry + scrolling timeline (`docs/visualizer.md`)
-* [ ] Record final demonstration · vision feedback loop
+
+* [x] Built the 2D visualizer. It shows a drone on screen that follows the real button states, along with live readouts and a scrolling timeline (`docs/visualizer.md`).
+* [ ] Record the final demo and add camera feedback.
 
 ---
 
-# Software Structure
+## Project Layout
 
 ```text
 firmware/
-  transmitter_controller/transmitter_controller.ino   fire-at-T protocol, event scheduler, transmitter channels
-  analog_switch/analog_switch.ino                     single-channel CD4066 switch driver (c/o/t/? over serial) — characterisation tool
-  bench_probe/bench_probe.ino                         multi-pin manual prodder for mapping transmitter contacts
-  turnonoff/turnonoff.ino                             single power-button pulse, triggered over serial
-  acoustic_receiver/acoustic_receiver.ino             earlier standalone Goertzel tone detector (kept for comparison)
+  transmitter_controller/transmitter_controller.ino   timed commands, event scheduler, controller buttons
+  analog_switch/analog_switch.ino                     single-switch CD4066 tester (c/o/t/? over serial)
+  bench_probe/bench_probe.ino                         manual tool for testing many pins while mapping the controller
+  turnonoff/turnonoff.ino                             sends a single power button press on request
+  acoustic_receiver/acoustic_receiver.ino             older tone detector that runs on the Arduino alone
 
 host/
-  audio/     capture · sources · beat_detector (flux + PLL) · features · dali_pipeline · encoders · audio_model
-  control/   protocol · link · clock_sync · scheduler (DroneScheduler) · scheduled_controller
-             latency_model · music_state · motion_primitives · motion_policy · physical_scheduler
-  sim/       fake_arduino (protocol sim over a pty) · drone_2d · panels · visualizer
-  response_test.py   mic -> beat -> response bring-up tool
+  audio/     recording, audio sources, beat detector, sound features, GPU audio prep, AI models
+  control/   command format, USB link, clock sync, schedulers, delay model,
+             music state, move library, dance logic, safety scheduler
+  sim/       simulated Arduino, 2D drone, display panels, visualizer
+  response_test.py   simple test: microphone to beat to response
 
 analysis/
-  detector_analysis.py   embedded-detector CSV characterisation
-  latency_analysis.py    reactive vs predictive beat-to-motion
-  pipeline_profile.py    per-stage latency, decoupling proof, feasibility tally
-  semantic_trace.py      per-window CLAP labels + novelty stats for a track
-  choreo_compare.py      command-timeline comparison across tracks
+  detector_analysis.py   studies the Arduino tone detector's CSV output
+  latency_analysis.py    compares reacting versus predicting the beat
+  pipeline_profile.py    measures each step's delay, proves the two paths are independent, counts skipped moves
+  semantic_trace.py      shows the AI's labels and section changes for a song
+  choreo_compare.py      compares the moves different songs produce
 
-docs/       architecture · hardware · transmitter_mapping · host_setup · fire_at_t_protocol
-            translation_engine · latency_experiment · audio_model · visualizer
+docs/       architecture, hardware, controller mapping, laptop setup, timed commands,
+            translation engine, delay experiment, audio model, visualizer
 
-tests/      ~96 tests (pytest); host-side logic + protocol sim, no hardware needed
+tests/      about 96 automated tests (pytest) that check the software without any hardware
 ```
 
-Firmware compiles with `arduino-cli`; the host stack is Python 3.11+ (RTX 5060
-for the GPU branch — falls back to CPU).
+The Arduino code compiles with `arduino-cli`. The laptop software needs Python 3.11 or
+newer. An RTX 5060 is used for the AI path, but the software will fall back to the CPU if
+no graphics card is available.
 
 ---
 
-# Running It
+## Running It
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 
-# 2D visualizer — drone reacts to a track, CLAP driving the choreography family
+# 2D visualizer where the drone dances to a song, with CLAP choosing the dance style
 python -m host.sim.visualizer --source media/track.wav --model --encoder clap
-#   --encoder randproj (no CLAP)   --inject-delay-ms 400 (watch decoupling)
-#   --screenshot out.png --screenshot-after 30 (headless)
+#   --encoder randproj          use the simple test model instead of CLAP
+#   --inject-delay-ms 400       slow down the AI on purpose to show the beat timing is unaffected
+#   --screenshot out.png --screenshot-after 30   save a screenshot without opening a window
 
-# characterise a track's semantic labels + section novelty
+# see what the AI thinks of each part of a song and where the sections change
 python -m analysis.semantic_trace media/track.wav --raw
 
-# compare the command timelines two tracks produce (+ the beat-only baseline)
+# compare the moves two songs produce, plus the beat-only version
 python -m analysis.choreo_compare media/track.wav media/track_2.wav --baseline
 
-# latency: reactive vs predictive, and the inference-decoupling proof
+# delay tests: reacting versus predicting, and proof the two paths are independent
 python -m analysis.latency_analysis --bpm 128 --seconds 30 --calibrate
 python -m analysis.pipeline_profile --prove
 
-# firmware
+# build the Arduino code
 arduino-cli compile -b arduino:avr:nano firmware/transmitter_controller
 ```
 
 ---
 
-# Earlier Acoustic Command Experiment
+## The Earlier Sound Command Experiment
 
-Before the GPU-based Physical AI branch, the project explored direct acoustic command decoding on a resource-constrained Arduino Nano.
+Before I added the AI on the graphics card, I tried a simpler idea. I wanted the Arduino
+to understand sound commands all by itself.
 
-The original question was:
+The question was:
 
-> Can a small embedded system reliably distinguish intentional acoustic commands from music, speech, motor noise, and environmental interference?
+> Can a tiny microcontroller tell the difference between a deliberate sound command and everything else, like music, talking, motor noise, and background sounds?
 
-The Arduino sampled an analog microphone and used the **Goertzel algorithm** to detect a small set of predefined command frequencies.
+The Arduino listened through a microphone and used the **Goertzel algorithm**, a
+lightweight method for checking whether a specific pitch is present, to detect a few
+chosen tones.
 
-Example protocol:
+The command system worked like this:
 
 ```text
 GUARD + SPIN   -> SPIN
@@ -802,37 +836,36 @@ GUARD + BOB    -> BOB
 GUARD + WIGGLE -> WIGGLE
 ```
 
-A guard tone acted as a simple start-of-frame delimiter to reduce accidental triggering.
+The guard tone works like saying "Hey" before giving an instruction. The Arduino only
+listens for a command after it hears the guard tone, which cuts down on false triggers.
 
-This branch remains useful as a comparison between:
+I kept this work because it makes a useful comparison between two approaches:
 
 ```text
-embedded deterministic perception
+simple listening on a tiny chip
 ```
 
 and
 
 ```text
-GPU-assisted learned perception
+AI listening on a graphics card
 ```
 
-rather than being discarded.
+### How the tone detector works
 
-## Embedded Audio Detector
+The detector uses:
 
-The original detector uses:
+* an Arduino Nano
+* an analog microphone
+* 8,000 audio samples per second
+* 200 samples per chunk of audio
+* four pitch detectors
+* a loudness threshold that adjusts to the room
+* a check that one pitch clearly stands out from the others
+* the guard tone to arm the system
+* live data sent over USB
 
-* Arduino Nano
-* analog microphone input
-* 8 kHz ADC sampling
-* 200-sample analysis windows
-* four Goertzel frequency detectors
-* adaptive energy threshold
-* relative frequency-energy threshold
-* guard-tone arming
-* serial telemetry
-
-Current target frequencies:
+The four tones it listens for are:
 
 ```text
 1600 Hz   GUARD
@@ -841,50 +874,54 @@ Current target frequencies:
 2800 Hz   WIGGLE
 ```
 
-A block is accepted only when:
+A chunk of audio only counts if both of these are true:
 
 ```text
-energy >= adaptive_gate
+the sound is loud enough to pass the threshold
 
 AND
 
-winning_frequency_ratio >= REL_THRESHOLD
+one pitch is clearly stronger than the others
 ```
 
-The adaptive energy gate is
+The loudness threshold is calculated like this:
 
 ```text
 gate = max(MIN_ENERGY, noise_floor × ENERGY_MARGIN)
 ```
 
-where the ambient noise estimate is maintained with an exponential moving average:
+In plain words, the sound has to be louder than a fixed minimum and also louder than the
+room's background noise by a certain margin.
+
+The background noise level is updated a little at a time with each chunk:
 
 ```c
 noiseEnergy += (energy - noiseEnergy) * alpha;
 ```
 
-This lets the detector adapt to microphone gain and ambient noise without storing a long history of samples on the Nano's limited memory.
+This lets the detector adjust to a quiet or noisy room without needing to store lots of
+past audio, which matters because the Nano has very little memory.
 
-## Embedded Sampling Architecture
+### How the Arduino records without missing sound
 
-Audio acquisition uses a ping-pong buffering scheme.
+The Arduino uses two buffers and takes turns with them, a trick called ping-pong buffering.
 
 ```text
-ADC ISR
+recording interrupt
   │
   ├──────── fills Buffer A
   │
   │            │
-  │            └── main loop analyzes Buffer B
+  │            └── main program analyzes Buffer B
   │
   └──────── fills Buffer B
                │
-               └── main loop analyzes Buffer A
+               └── main program analyzes Buffer A
 ```
 
-The ADC is timer-driven at 8 kHz.
+A timer tells the Arduino to take a sample 8,000 times every second.
 
-Each 200-sample block therefore represents:
+That means each 200-sample chunk holds
 
 $$
 \frac{200}{8000} = 25\text{ ms}
@@ -892,34 +929,34 @@ $$
 
 of audio.
 
-This permits acquisition to continue while the previous block is analyzed.
+Because of the two buffers, the Arduino keeps recording new sound while it analyzes the
+previous chunk. If the analysis ever takes too long and no buffer is free, a `dropped`
+counter goes up so I can see it happened.
 
-A `dropped` counter records occasions when analysis and telemetry take too long and no free buffer is available.
+### Live data output
 
-## Telemetry
-
-The embedded detector exposes CSV telemetry at 115200 baud:
+The detector sends a line of CSV data at 115200 baud for every chunk:
 
 ```text
 ms,energy,r1600,r2000,r2400,r2800,best,tone,armed,move,dropped,noise,gate
 ```
 
-Important fields include:
+Here is what each field means:
 
-| Field           | Meaning                              |
-| --------------- | ------------------------------------ |
-| `ms`            | block timestamp                      |
-| `energy`        | total block energy                   |
-| `r1600...r2800` | relative energy in each Goertzel bin |
-| `best`          | strongest candidate frequency        |
-| `tone`          | accepted tone or `-1`                |
-| `armed`         | guard-tone state                     |
-| `move`          | current decoded behavior             |
-| `dropped`       | dropped acquisition blocks           |
-| `noise`         | adaptive ambient-noise estimate      |
-| `gate`          | current effective energy threshold   |
+| Field           | What it means                                  |
+| --------------- | ---------------------------------------------- |
+| `ms`            | the time the chunk was recorded                |
+| `energy`        | how loud the chunk was overall                 |
+| `r1600...r2800` | how strong each of the four tones was          |
+| `best`          | the strongest tone in the chunk                |
+| `tone`          | the accepted tone, or `-1` if none             |
+| `armed`         | whether the guard tone has been heard          |
+| `move`          | the command that was recognized                |
+| `dropped`       | how many chunks were missed                    |
+| `noise`         | the current background noise level             |
+| `gate`          | the current loudness threshold                 |
 
-Example capture:
+To save this data to a file, run:
 
 ```bash
 arduino-cli monitor \
@@ -927,94 +964,102 @@ arduino-cli monitor \
   -c baudrate=115200 > run.csv
 ```
 
-Telemetry is primarily intended for detector characterization rather than normal field operation.
+This output is mainly for testing and tuning the detector. It is not needed during normal use.
 
 ---
 
-# Experimental Questions
-
-The project is intended to answer several engineering questions.
+## Questions This Project Explores
 
 ### Reverse engineering
 
-How little of an undocumented consumer robot needs to be replaced before it becomes programmable?
+How little of an undocumented toy needs to be changed before you can program it?
 
-### Embedded perception
+### Listening on a tiny chip
 
-How robustly can a 2 KB-class microcontroller distinguish intentional acoustic commands from environmental audio?
+How well can a microcontroller with only about 2 KB of memory tell real sound commands
+apart from everyday noise?
 
-### Heterogeneous robotics
+### Splitting the work
 
-What functionality belongs on a GPU host versus a microcontroller?
+Which jobs belong on a powerful laptop, and which belong on a tiny microcontroller?
 
-### Music-conditioned control
+### Music and movement
 
-Can learned audio representations provide useful higher-level behavior information while deterministic DSP maintains precise timing?
+Can an AI model add useful understanding of the music while simple signal math keeps the
+timing precise?
 
-### Temporal synchronization
+### Timing
 
-How much does latency prediction improve alignment between musical events and physical motion?
+How much better does the drone stay on the beat when the system predicts the beat instead
+of reacting to it?
 
 ---
 
-# Future Work
+## Future Ideas
 
-Possible extensions include:
+### Camera feedback
 
-### Vision feedback
-
-A laptop camera could track the drone and close the loop around actual motion.
+A laptop camera could watch the drone and check whether it actually moved the way it was
+told to.
 
 ```text
                     ┌──────── camera ◄────────┐
                     │                         │
 audio -> RTX -> planner -> Arduino -> drone
                     ▲                         │
-                    └──── pose estimate ──────┘
+                    └──── drone position ─────┘
 ```
 
-This would turn the current audio-conditioned command system into a true externally observed closed-loop controller.
+This would let the system correct itself based on what really happened, instead of only
+sending commands and hoping for the best.
 
-### Learned choreography
+### AI-created dances
 
-Instead of selecting manually designed motion primitives, a model could generate short sequences conditioned on musical embeddings.
+Instead of choosing from moves I designed by hand, an AI model could invent short move
+sequences based on the music.
 
-### Latency-aware motion planning
+### Timing for each move
 
-Different commands may have different RF, stabilization, and mechanical response delays. Each primitive could maintain its own measured timing model.
+Different moves may take different amounts of time to show up, because of the radio, the
+balance system, and the drone's physical response. Each move could have its own measured
+delay so it lands on the beat more accurately.
 
-### Embedded migration
+### Going wireless
 
-Parts of the host inference pipeline could eventually be moved to an NVIDIA Jetson platform for untethered operation.
+Parts of the laptop software could eventually run on an NVIDIA Jetson board, so the system
+would not need to be tied to a laptop.
 
 ---
 
-# Design Philosophy
+## Design Philosophy
 
-This project deliberately avoids replacing components simply because they are undocumented.
+I deliberately avoided replacing parts just because they came without documentation.
 
-The original aircraft already contains:
+The original drone already has:
 
-* a working RF link
-* a flight controller
-* stabilization
+* a working radio link
+* a flight computer
+* a balance system
 * motor drivers
-* mechanical integration
+* a body where everything already fits together
 
-The engineering challenge is therefore not:
+So the real challenge was never this:
 
-> How can I rebuild this drone?
+> How do I rebuild this drone?
 
-It is:
+It was this:
 
-> How can I expose the smallest possible programmable interface to an existing physical system, then build perception and intelligence above that interface?
+> What is the smallest possible way to control the drone I already have, and how can I build smart behaviour on top of it?
 
-The resulting stack combines reverse engineering, embedded systems, signal processing, GPU inference, robotics control, and physical experimentation on top of an extremely inexpensive consumer platform.
+The result brings together reverse engineering, embedded programming, audio processing,
+AI on a graphics card, robot control, and hands-on testing, all on top of a very cheap toy.
 
 ---
 
 ## Disclaimer
 
-This project is an experimental robotics prototype intended for controlled indoor testing.
+This is an experimental robot prototype meant for careful indoor testing.
 
-Propellers should be removed during electrical interface testing whenever flight is not required. Flight testing should be conducted in an open, controlled area with an immediate means of disabling the aircraft.
+Remove the propellers while working on the wiring or whenever the drone does not need to
+fly. When you do test flights, use an open, controlled space and have a quick way to shut
+the drone off.

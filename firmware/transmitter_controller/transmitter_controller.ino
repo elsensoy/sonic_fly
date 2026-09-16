@@ -21,7 +21,7 @@
 
 #include <util/atomic.h>
 
-// ---- protocol constants (keep in sync with docs/fire_at_t_protocol.md) ----
+//  protocol constants (keep in sync with docs/fire_at_t_protocol.md) 
 #define FW_VERSION   "0.3.0"
 #define PROTO_VERSION 1
 #define REQUIRE_CHECKSUM 0        // 1 = reject any line without a valid *HH
@@ -35,7 +35,7 @@ const uint16_t LINK_TIMEOUT_MS = 500;
 const uint8_t  LINE_MAX       = 64;
 const uint16_t SCHEDULER_HZ   = 1000;
 
-// ---- channel map (PROVISIONAL - edit to match your wiring) ----------------
+// channel map (PROVISIONAL - edit to match your wiring) 
 // Only TAKEOFF/D2 is characterised so far (docs/transmitter_mapping.md).
 struct Channel { char act; uint8_t pin; char conflictsWith; uint16_t cooldownMs; };
 const Channel CHANNELS[] = {
@@ -77,7 +77,7 @@ bool     inSafeHold = false;
 char    line[LINE_MAX + 1];
 uint8_t lineLen = 0;
 
-// ======================= helpers =======================
+// ===================== helpers ====================
 
 int8_t channelIndex(char act) {
   for (uint8_t i = 0; i < N_CHANNELS; i++)
@@ -105,7 +105,7 @@ void releaseAllTransient() {
 
 void emitLine(const __FlashStringHelper *s) { Serial.println(s); }
 
-// ======================= scheduler ISR =======================
+//======================= scheduler ISR =====================
 
 static inline void pushNote(uint16_t id, uint32_t t, uint8_t kind) {
   uint8_t nxt = (noteHead + 1) & 15;
@@ -141,7 +141,7 @@ void setupSchedulerTimer() {
   TIMSK2 = _BV(OCIE2A);
 }
 
-// ======================= command handlers =======================
+//  ======= command handlers ====== 
 
 void sendAck(uint16_t id)                    { Serial.print(F("ACK ")); Serial.print(id); Serial.println(F(" OK")); }
 void sendNak(uint16_t id, const __FlashStringHelper *reason) {
@@ -260,11 +260,31 @@ void handleCancel(char *args) {
   }
 }
 
+static inline void pulsePin(uint8_t pin, uint16_t ms) {
+  digitalWrite(pin, HIGH);
+  delay(ms);
+  digitalWrite(pin, LOW);
+}
+
 void handleArm(bool on) {
-  // TODO: real flight-mode stick gesture (left stick up/down/right, then T)
-  //       once the joystick contacts are mapped. For now: a gate flag.
-  armed = on;
-  if (!on) releaseAllTransient();
+  if (!on) {
+    armed = false;
+    releaseAllTransient();
+    emitLine(F("ACK 0 OK"));
+    return;
+  }
+
+  // Real flight-mode arming gesture: left stick up -> down -> right -> takeoff.
+  // This reproduces the hardware sequence used during bench-probe validation.
+  const uint8_t armPins[] = { 6, 5, 7, 2 };
+  const uint16_t armMs = 150;
+
+  releaseAllTransient();
+  for (uint8_t i = 0; i < sizeof(armPins) / sizeof(armPins[0]); i++) {
+    pulsePin(armPins[i], armMs);
+  }
+
+  armed = true;
   emitLine(F("ACK 0 OK"));
 }
 

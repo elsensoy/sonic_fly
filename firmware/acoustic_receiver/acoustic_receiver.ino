@@ -1,15 +1,15 @@
 /*
- * Audio-controlled dancing drone — tone command receiver
+ * Audio-controlled dancing drone -- tone command receiver
  * --
  * Board:  Arduino Nano / Uno (ATmega328P)
  * Mic:    electret mic module on A0 (output biased ~Vcc/2)
  * Motors: 2 coreless motors via MOSFET or DRV8833 on D9 & D10.
- * Timers: Timer1 = motor PWM *and* the sample clock — Fast PWM mode 14 with
+ * Timers: Timer1 = motor PWM *and* the sample clock -- Fast PWM mode 14 with
  *         TOP = ICR1, overflowing at exactly SAMPLE_RATE Hz. Every overflow
  *         hardware-triggers the ADC, whose conversion-complete ISR fills a
  *         ping-pong buffer. Timer0 (millis/micros) and Timer2 are untouched.
  *
- * Protocol v0 — single-tone commands, volume-independent detection.
+ * Protocol v0 -- single-tone commands, volume-independent detection.
  *   - Each command = one distinct frequency.
  *   - A "guard" tone arms the receiver; a move tone must follow within a
  *     short window. This is start-of-frame delimiter and it kills most
@@ -24,7 +24,7 @@
 #define LOG_TELEMETRY 1        // 1 = stream one CSV row per block on Serial (115200) <-- TUNE
                               //     Costs ~5 ms/block at 115200 baud; set 0 for field runs.
 
-// ============ audio / detection ============
+//  audio / detection 
 const int      MIC_PIN     = A0;
 const uint16_t SAMPLE_RATE = 8000;   // Hz. Nyquist = 4000, so tones must stay < 4000
 const uint16_t N           = 200;    // samples/block -> 25 ms window, 40 Hz bins
@@ -59,17 +59,17 @@ const uint16_t PRIME_BLOCKS  = 40;     // startup window (~1.3 s): learn the flo
 float    noiseEnergy = 0;              // current ambient-noise energy estimate
 uint16_t primeLeft   = PRIME_BLOCKS;   // blocks remaining in the startup window
 
-// ============ motors ============
+//  motors 
 const uint8_t MOTOR_A = 9;
 const uint8_t MOTOR_B = 10;
 
-// ============ move state machine =========
+//  move state machine 
 enum Move { IDLE, SPIN, BOB, WIGGLE };
 Move          currentMove = IDLE;
 unsigned long moveStart   = 0;
 const unsigned long MOVE_MS = 1200;  // how long a move plays before idling  <-- TUNE
 
-// ============ Goertzel ==========
+//  Goertzel 
 float   coeff[NUM_FREQS];
 int16_t samples[N];
 
@@ -81,12 +81,12 @@ void computeCoeffs() {
   }
 }
 
-// ============ ISR sampling (Timer1-paced, ping-pong) ============
+//  ISR sampling (Timer1-paced, ping-pong) 
 // The ADC free-runs, hardware-triggered by Timer1 overflow at SAMPLE_RATE Hz.
 // ADC_vect drops one sample into the buffer it is currently filling; when that
 // buffer is full it hands the index to loop() via `readyBuf` and switches to
 // the other buffer. If loop() has not released the previous block yet, the ISR
-// discards the fresh one and bumps `dropped` — it never writes the buffer
+// discards the fresh one and bumps `dropped` -- it never writes the buffer
 // loop() is reading, so a slow loop() costs whole blocks, never a torn window.
 //
 // Why no lock is needed (2 buffers):
@@ -188,7 +188,7 @@ int detectTone() {
 // EMA update for the ambient-noise estimate. Seeded from the first block so it
 // starts in the right ballpark; adapts fast during the startup window, then
 // slowly. After startup it learns only from blocks that are (a) not an accepted
-// command, (b) not taken while the motors run, and (c) not a wild outlier — so
+// command, (b) not taken while the motors run, and (c) not a wild outlier -- so
 // neither a sustained tone nor a one-off clap/slam can inflate the floor and
 // blind the detector for seconds. Steady ambient changes (a fan switching on)
 // stay under NOISE_OUTLIER and are tracked.
@@ -205,12 +205,12 @@ void updateNoise() {
   noiseEnergy += (tlm.energy - noiseEnergy) * NOISE_ALPHA;   // slow steady tracking
 }
 
-// ============ motors / moves ============
+//  motors / moves 
 // Timer1 is in Fast PWM mode 14 (see setupTimer1), so the motor duty lives in
-// OCR1A (D9) / OCR1B (D10) directly — analogWrite() would fight that config.
+// OCR1A (D9) / OCR1B (D10) directly -- analogWrite() would fight that config.
 // Map the familiar 0..255 range onto 0..T1_TOP; called rarely, so the divide
 // is free. Fast PWM can't emit a true 0% (OCR=0 still spikes one clock per
-// period), so a zero channel is disconnected from the timer and driven low —
+// period), so a zero channel is disconnected from the timer and driven low --
 // exactly what the core's analogWrite(pin, 0) does.
 void setMotors(uint8_t a, uint8_t b) {
   if (a == 0) { TCCR1A &= ~_BV(COM1A1); digitalWrite(MOTOR_A, LOW); }
@@ -250,7 +250,7 @@ void updateMotors() {
   }
 }
 
-// ============ arming / framing ============
+//  arming / framing 
 bool          armed   = false;
 unsigned long armedAt = 0;
 const unsigned long ARM_WINDOW = 1500;   // ms to send a move after the guard <-- TUNE
@@ -277,7 +277,7 @@ void logTelemetry() {
 // Timer1: Fast PWM mode 14 (TOP = ICR1), non-inverting PWM on OC1A/OC1B,
 // prescaler /1. Overflow rate = F_CPU / (T1_TOP + 1) = SAMPLE_RATE, and that
 // same overflow is the ADC trigger. The PWM carrier also lands at SAMPLE_RATE
-// (8 kHz) — above the motors' mechanical bandwidth, and trivial for a MOSFET
+// (8 kHz) -- above the motors' mechanical bandwidth, and trivial for a MOSFET
 // or the DRV8833 to switch.
 void setupTimer1() {
   pinMode(MOTOR_A, OUTPUT);           // OC1A / D9
@@ -294,9 +294,9 @@ void setupTimer1() {
 }
 
 // ADC: AVcc reference, right-adjusted, channel = MIC_PIN, prescaler /16
-// (~13 us/conversion — tiny next to the 125 us sample period). Auto-triggered
+// (~13 us/conversion -- tiny next to the 125 us sample period). Auto-triggered
 // by Timer1 overflow; ADC_vect clears TOV1 to re-arm the edge. Bump to /32
-// ( _BV(ADPS2) | _BV(ADPS0) ) for cleaner low bits if the noise floor is high —
+// ( _BV(ADPS2) | _BV(ADPS0) ) for cleaner low bits if the noise floor is high --
 // still ~5x margin.                                                  <-- TUNE
 void setupADC() {
   ADMUX  = _BV(REFS0) | ((MIC_PIN - A0) & 0x07);
